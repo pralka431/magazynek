@@ -1,114 +1,110 @@
 import streamlit as st
+from supabase import create_client, Client
+import pandas as pd
 
 # --- Konfiguracja Strony ---
-st.set_page_config(
-    page_title="Prosty Magazyn (Streamlit + Sesja)",
-    layout="wide"
-)
+st.set_page_config(page_title="Magazyn Pro - Supabase", layout="wide")
 
-# --- Inicjalizacja Danych Magazynu ---
+# --- Połączenie z Supabase ---
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(url, key)
 
-# Sprawdzanie, czy lista towarów istnieje już w stanie sesji.
-# Jeśli nie istnieje (pierwsze uruchomienie), tworzymy pustą listę.
-if 'inventory' not in st.session_state:
-    st.session_state['inventory'] = []
+# --- Funkcje bazy danych ---
 
-## --- Funkcje Magazynu ---
+def fetch_categories():
+    """Pobiera wszystkie kategorie."""
+    response = supabase.table("Kategorie").select("*").execute()
+    return response.data
 
-def add_item(name, quantity):
-    """Dodaje nowy towar do magazynu (listy w stanie sesji)."""
-    if name and quantity:
-        try:
-            quantity_int = int(quantity)
-            if quantity_int > 0:
-                new_item = {"Nazwa": name, "Ilość": quantity_int}
-                st.session_state.inventory.append(new_item)
-                st.success(f"Dodano: {name} (Ilość: {quantity_int})")
+def fetch_products():
+    """Pobiera produkty wraz z nazwami ich kategorii (JOIN)."""
+    # Supabase pozwala na proste łączenie tabel przez relacje:
+    response = supabase.table("Produkty").select("id, nazwa, liczba, cena, Kategorie(nazwa)").execute()
+    return response.data
+
+def add_product(nazwa, liczba, cena, kategoria_id):
+    """Dodaje produkt do bazy."""
+    data = {
+        "nazwa": nazwa,
+        "liczba": int(liczba),
+        "cena": float(cena),
+        "kategoria_id": kategoria_id
+    }
+    supabase.table("Produkty").insert(data).execute()
+    st.rerun()
+
+def delete_product(product_id):
+    """Usuwa produkt."""
+    supabase.table("Produkty").delete().eq("id", product_id).execute()
+    st.rerun()
+
+# --- Interfejs Użytkownika ---
+
+st.title("📦 Zaawansowany Magazyn")
+
+# Pobieramy dane na starcie
+categories = fetch_categories()
+products = fetch_products()
+
+# Tworzymy zakładki dla lepszej organizacji
+tab1, tab2 = st.tabs(["📋 Stan Magazynu", "➕ Dodaj Produkt"])
+
+with tab2:
+    st.header("Dodaj nowy produkt")
+    with st.form("add_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            name = st.text_input("Nazwa produktu")
+            # Selectbox dla kategorii - mapujemy nazwę na ID
+            cat_options = {c['nazwa']: c['id'] for c in categories}
+            selected_cat_name = st.selectbox("Kategoria", options=list(cat_options.keys()))
+            
+        with col2:
+            qty = st.number_input("Liczba sztuk", min_value=0, step=1)
+            price = st.number_input("Cena (PLN)", min_value=0.0, step=0.01)
+            
+        submit = st.form_submit_button("Dodaj produkt", type="primary")
+        
+        if submit:
+            if name and selected_cat_name:
+                add_product(name, qty, price, cat_options[selected_cat_name])
+                st.success(f"Dodano produkt: {name}")
             else:
-                st.error("Ilość musi być liczbą całkowitą większą od zera.")
-        except ValueError:
-            st.error("Ilość musi być poprawną liczbą całkowitą.")
+                st.error("Wypełnij wszystkie pola!")
+
+with tab1:
+    st.header("Aktualne zapasy")
+    
+    if products:
+        # Przekształcenie danych do ładnej tabeli
+        display_data = []
+        for p in products:
+            display_data.append({
+                "ID": p['id'],
+                "Nazwa": p['nazwa'],
+                "Liczba": p['liczba'],
+                "Cena": f"{p['cena']} zł",
+                "Kategoria": p['Kategorie']['nazwa'] if p['Kategorie'] else "Brak"
+            })
+        
+        df = pd.DataFrame(display_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        st.subheader("🗑️ Usuwanie produktów")
+        
+        # Opcja usuwania
+        del_col1, del_col2 = st.columns([3, 1])
+        with del_col1:
+            to_delete = st.selectbox("Wybierz produkt do usunięcia", 
+                                     options=[f"{p['nazwa']} (ID: {p['id']})" for p in products])
+        with del_col2:
+            st.write("") # Margines
+            if st.button("Usuń trwale", type="secondary", use_container_width=True):
+                # Wyciągamy ID z tekstu: "Nazwa (ID: 123)"
+                p_id = int(to_delete.split("ID: ")[1].replace(")", ""))
+                delete_product(p_id)
     else:
-        st.error("Proszę podać nazwę i ilość towaru.")
-
-def delete_item(index):
-    """Usuwa towar z magazynu na podstawie jego indeksu."""
-    if 0 <= index < len(st.session_state.inventory):
-        removed_item = st.session_state.inventory.pop(index)
-        st.success(f"Usunięto towar: {removed_item['Nazwa']}")
-    else:
-        st.error("Wystąpił błąd podczas usuwania. Indeks poza zakresem.")
-
-
-# --- Interfejs Użytkownika Streamlit ---
-
-st.title("📦 Prosty Magazyn w Streamlit")
-st.markdown("---")
-
-# 1. Panel Dodawania Towaru
-with st.container(border=True):
-    st.header("➕ Dodaj Nowy Towar")
-    
-    # Używamy kolumn dla lepszego układu
-    col1, col2, col3 = st.columns([3, 1, 1])
-
-    with col1:
-        new_item_name = st.text_input("Nazwa Towaru", key="new_name")
-    with col2:
-        new_item_quantity = st.number_input("Ilość", min_value=1, value=1, step=1, key="new_quantity")
-    with col3:
-        # Pusty wiersz dla wyrównania przycisku
-        st.markdown("<br>", unsafe_allow_html=True)
-        # Przyciski Streamlit domyślnie wywołują ponowne uruchomienie skryptu
-        if st.button("Dodaj do Magazynu", type="primary"):
-            # Wywołujemy funkcję dodającą
-            # Przekazujemy wartości z pól, które Streamlit automatycznie zaktualizował
-            add_item(new_item_name, new_item_quantity)
-
-st.markdown("---")
-
-# 2. Wyświetlanie Magazynu i Panel Usuwania
-st.header("📋 Aktualny Stan Magazynu")
-
-if st.session_state.inventory:
-    # Tworzenie DataFrame dla lepszej wizualizacji w Streamlit
-    import pandas as pd
-    df = pd.DataFrame(st.session_state.inventory)
-    
-    # Wyświetlanie danych jako interaktywna tabela
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_order=["Nazwa", "Ilość"]
-    )
-    
-    st.subheader("🗑️ Usuń Towar")
-    
-    # Lista nazw towarów do wyboru
-    item_names = [item['Nazwa'] for item in st.session_state.inventory]
-    
-    # Widget Selectbox do wyboru towaru do usunięcia
-    item_to_delete_name = st.selectbox(
-        "Wybierz towar do usunięcia:",
-        options=item_names,
-        index=None,
-        placeholder="Wybierz towar...",
-        key="select_to_delete"
-    )
-
-    if st.button("Usuń Wybrany Towar", type="secondary"):
-        if item_to_delete_name:
-            # Znajdujemy indeks wybranego towaru
-            try:
-                index_to_delete = item_names.index(item_to_delete_name)
-                delete_item(index_to_delete)
-            except ValueError:
-                st.error("Błąd: Nie znaleziono wybranego towaru.")
-        else:
-            st.warning("Proszę wybrać towar do usunięcia.")
-    
-else:
-    st.info("Magazyn jest pusty. Dodaj pierwszy towar powyżej.")
-
-# --- Koniec Aplikacji ---
+        st.info("Magazyn jest pusty. Dodaj pierwszy produkt w zakładce obok.")
