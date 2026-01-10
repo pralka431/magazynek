@@ -17,18 +17,14 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def fetch_data():
     categories = supabase.table("Kategorie").select("*").execute().data
     products = supabase.table("Produkty").select("*, Kategorie(nazwa)").execute().data
-    # Pobieramy historię (tabela wydania)
     shipments = supabase.table("wydania").select("*, Produkty(nazwa)").order("data_wydania", desc=True).execute().data
     return categories, products, shipments
 
 def add_product(nazwa, liczba, cena, kategoria_id):
-    """Dodaje produkt i zapisuje to jako 'Dodanie' w historii."""
-    # 1. Dodaj produkt
     res = supabase.table("Produkty").insert({
         "nazwa": nazwa, "liczba": liczba, "cena": cena, "kategoria_id": kategoria_id
     }).execute()
     
-    # 2. Zapisz w historii jako dodatni ruch (odbiorca = 'DOSTAWA')
     if res.data:
         new_id = res.data[0]['id']
         supabase.table("wydania").insert({
@@ -39,22 +35,21 @@ def add_product(nazwa, liczba, cena, kategoria_id):
         }).execute()
     st.rerun()
 
-def update_stock(product_id, current_qty, change):
+def update_stock(product_id, current_qty, change, typ_operacji="DOSTAWA"):
     """Aktualizuje stan i zapisuje ruch w historii."""
     new_qty = current_qty + change
     if new_qty < 0:
         st.error("Nie można zejść poniżej zera!")
         return
     
-    # Aktualizacja stanu
+    # Aktualizacja stanu w tabeli Produkty
     supabase.table("Produkty").update({"liczba": new_qty}).eq("id", product_id).execute()
     
-    # Zapis ruchu w historii (dodatnia liczba = dostawa, ujemna = wydanie)
-    typ_ruchu = "DOSTAWA" if change > 0 else "WYDANIE"
+    # Zapis ruchu w historii (tabela wydania)
     supabase.table("wydania").insert({
         "produkt_id": product_id,
         "ilosc": abs(change),
-        "odbiorca": typ_ruchu,
+        "odbiorca": typ_operacji,
         "data_wydania": datetime.now().isoformat()
     }).execute()
     st.rerun()
@@ -76,13 +71,19 @@ with tabs[0]:
     if products:
         for p in products:
             with st.container(border=True):
-                c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+                c1, c2, c3, c4 = st.columns([3, 2, 2, 3])
+                
                 c1.write(f"**{p['nazwa']}**")
                 kat = p['Kategorie']['nazwa'] if p.get('Kategorie') else "Brak"
                 c2.write(f"Kategoria: {kat}")
                 c3.write(f"Stan: **{p['liczba']}** szt.")
-                if c4.button("➕ Dostawa (+1)", key=f"inc_{p['id']}"):
-                    update_stock(p['id'], p['liczba'], 1)
+                
+                # Nowa sekcja: Dodawanie nieregularnych ilości
+                with c4:
+                    sub_c1, sub_c2 = st.columns([1, 1])
+                    add_amt = sub_c1.number_input("Ile dodać?", min_value=1, step=1, key=f"input_{p['id']}", label_visibility="collapsed")
+                    if sub_c2.button("➕ Dodaj", key=f"btn_{p['id']}", use_container_width=True):
+                        update_stock(p['id'], p['liczba'], add_amt, "DOSTAWA")
     else:
         st.info("Magazyn jest pusty.")
 
@@ -93,11 +94,10 @@ with tabs[1]:
             options = {f"{p['nazwa']} (Stan: {p['liczba']})": p for p in products}
             sel = st.selectbox("Wybierz towar do wydania", options=list(options.keys()))
             qty = st.number_input("Ilość do wydania", min_value=1, step=1)
-            # Odbiorca usunięty z formularza zgodnie z prośbą
             
             if st.form_submit_button("Potwierdź Wydanie", type="primary"):
                 p_info = options[sel]
-                update_stock(p_info['id'], p_info['liczba'], -qty)
+                update_stock(p_info['id'], p_info['liczba'], -qty, "WYDANIE")
     else:
         st.warning("Brak produktów.")
 
@@ -107,7 +107,6 @@ with tabs[2]:
     if shipments:
         df_h = []
         for s in shipments:
-            # Określamy czy to było dodanie czy wydanie na podstawie pola odbiorca
             is_delivery = s['odbiorca'] in ["DOSTAWA", "NOWY PRODUKT"]
             df_h.append({
                 "Data": s['data_wydania'][:16].replace("T", " "),
