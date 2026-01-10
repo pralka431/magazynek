@@ -3,7 +3,7 @@ from supabase import create_client, Client
 import pandas as pd
 
 # --- Konfiguracja Strony ---
-st.set_page_config(page_title="PRO Magazyn + Wydania", layout="wide", page_icon="📦")
+st.set_page_config(page_title="PRO Magazyn", layout="wide", page_icon="📦")
 
 # --- TWOJE DANE DOSTĘPOWE ---
 SUPABASE_URL = "https://ijfoshdlcpccebzgpmox.supabase.co"
@@ -11,54 +11,65 @@ SUPABASE_KEY = "sb_publishable_A1XPX9TeO-Q-rdpcujK75g_DeeUqBkf"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- FUNKCJE LOGICZNE ---
+# --- FUNKCJE LOGICZNE (Nazwy tabel z Wielkich Liter) ---
 
 def fetch_data():
-    categories = supabase.table("kategorie").select("*").execute().data
-    products = supabase.table("produkty").select("*, kategorie(nazwa)").execute().data
-    # Pobieramy historię wydań z nazwami produktów
-    shipments = supabase.table("wydania").select("*, produkty(nazwa)").order("created_at", desc=True).execute().data
+    """Pobiera dane z tabel o nazwach: Kategorie, Produkty, Wydania."""
+    # Pobieranie kategorii
+    categories = supabase.table("Kategorie").select("*").execute().data
+    
+    # Pobieranie produktów (zwróć uwagę na Wielkie Litery w JOINie)
+    products = supabase.table("Produkty").select("*, Kategorie(nazwa)").execute().data
+    
+    # Pobieranie historii wydań
+    shipments = supabase.table("Wydania").select("*, Produkty(nazwa)").order("created_at", desc=True).execute().data
     return categories, products, shipments
 
+def update_quantity(product_id, new_qty):
+    """Aktualizuje tabelę Produkty."""
+    if new_qty >= 0:
+        supabase.table("Produkty").update({"liczba": new_qty}).eq("id", product_id).execute()
+        st.rerun()
+
 def issue_goods(product_id, qty, recipient, current_stock):
-    """Obsługuje wydanie towaru: aktualizuje stan i dodaje wpis do historii."""
+    """Wydaje towar i zapisuje w tabeli Wydania."""
     if qty > current_stock:
-        st.error(f"Błąd: Nie masz tyle na stanie! (Dostępne: {current_stock})")
+        st.error(f"Błąd: Za mało towaru! (Dostępne: {current_stock})")
         return False
     
-    try:
-        # 1. Zmniejsz stan w tabeli produkty
-        new_stock = current_stock - qty
-        supabase.table("produkty").update({"liczba": new_stock}).eq("id", product_id).execute()
-        
-        # 2. Dodaj wpis do tabeli wydania
-        supabase.table("wydania").insert({
-            "produkt_id": product_id,
-            "ilosc": qty,
-            "odbiorca": recipient
-        }).execute()
-        
-        st.success(f"Wydano {qty} szt. towaru dla: {recipient}")
-        st.rerun()
-    except Exception as e:
-        st.error(f"Błąd podczas wydawania: {e}")
-
-def update_quantity(product_id, new_qty):
-    if new_qty >= 0:
-        supabase.table("produkty").update({"liczba": new_qty}).eq("id", product_id).execute()
-        st.rerun()
+    new_stock = current_stock - qty
+    # Aktualizacja stanu
+    supabase.table("Produkty").update({"liczba": new_stock}).eq("id", product_id).execute()
+    # Zapis historii
+    supabase.table("Wydania").insert({
+        "produkt_id": product_id,
+        "ilosc": qty,
+        "odbiorca": recipient
+    }).execute()
+    
+    st.success(f"Wydano {qty} szt. dla: {recipient}")
+    st.rerun()
 
 def add_product(nazwa, liczba, cena, kategoria_id):
-    supabase.table("produkty").insert({
-        "nazwa": nazwa, "liczba": liczba, "cena": cena, "kategoria_id": kategoria_id
+    """Dodaje do tabeli Produkty."""
+    supabase.table("Produkty").insert({
+        "nazwa": nazwa, 
+        "liczba": liczba, 
+        "cena": cena, 
+        "kategoria_id": kategoria_id
     }).execute()
     st.rerun()
 
-# --- INTERFEJS ---
+# --- INTERFEJS UŻYTKOWNIKA ---
 
-st.title("📦 System Magazynowy z Wydawaniem")
+st.title("📦 System Magazynowy")
 
-categories, products, shipments = fetch_data()
+try:
+    categories, products, shipments = fetch_data()
+except Exception as e:
+    st.error(f"Wystąpił błąd podczas pobierania danych: {e}")
+    st.info("💡 Sprawdź w Supabase czy Twoje tabele na pewno nazywają się: 'Produkty', 'Kategorie' i 'Wydania' (dokładnie tak, z wielkiej litery).")
+    st.stop()
 
 # Zakładki
 tab_stan, tab_wydaj, tab_historia, tab_dodaj = st.tabs([
@@ -67,68 +78,53 @@ tab_stan, tab_wydaj, tab_historia, tab_dodaj = st.tabs([
 
 # --- ZAKŁADKA 1: STAN ---
 with tab_stan:
-    st.subheader("Aktualne zapasy")
     if products:
         for p in products:
             with st.container(border=True):
                 c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
                 c1.write(f"**{p['nazwa']}**")
-                c2.write(f"Kat: {p['kategorie']['nazwa'] if p['kategorie'] else 'Brak'}")
+                # Dostęp przez wielką literę 'Kategorie'
+                kat_nazwa = p['Kategorie']['nazwa'] if p.get('Kategorie') else "Brak"
+                c2.write(f"Kategoria: {kat_nazwa}")
                 c3.write(f"Stan: **{p['liczba']}** szt.")
-                if c4.button("➕ Szybka Dostawa", key=f"s_add_{p['id']}"):
+                if c4.button("➕ Dostawa", key=f"add_{p['id']}"):
                     update_quantity(p['id'], p['liczba'] + 1)
     else:
-        st.info("Magazyn jest pusty.")
+        st.info("Brak towarów.")
 
 # --- ZAKŁADKA 2: WYDAWANIE ---
 with tab_wydaj:
-    st.subheader("Formularz wydania zewnętrznego")
     if products:
-        with st.form("form_wydania", clear_on_submit=True):
-            # Tworzymy mapę produktów do wyboru
-            prod_map = {f"{p['nazwa']} (Dostępne: {p['liczba']})": p for p in products}
-            selected_prod_label = st.selectbox("Wybierz produkt", options=list(prod_map.keys()))
+        with st.form("form_wydania"):
+            options = {f"{p['nazwa']} (Stan: {p['liczba']})": p for p in products}
+            sel_label = st.selectbox("Wybierz towar", options=list(options.keys()))
+            qty = st.number_input("Ile sztuk", min_value=1)
+            rec = st.text_input("Kto odbiera?")
             
-            col_w1, col_w2 = st.columns(2)
-            with col_w1:
-                w_qty = st.number_input("Ilość do wydania", min_value=1, step=1)
-            with col_w2:
-                w_recipient = st.text_input("Odbiorca / Cel wydania (np. Jan Kowalski, Budowa A)")
-            
-            if st.form_submit_button("Potwierdź Wydanie", type="primary"):
-                p_data = prod_map[selected_prod_label]
-                issue_goods(p_data['id'], w_qty, w_recipient, p_data['liczba'])
-    else:
-        st.warning("Brak produktów w bazie.")
+            if st.form_submit_button("Zatwierdź"):
+                p_info = options[sel_label]
+                issue_goods(p_info['id'], qty, rec, p_info['liczba'])
 
 # --- ZAKŁADKA 3: HISTORIA ---
 with tab_historia:
-    st.subheader("Ostatnie wydania z magazynu")
     if shipments:
-        history_df = []
+        df_hist = []
         for s in shipments:
-            history_df.append({
+            df_hist.append({
                 "Data": s['created_at'][:16].replace("T", " "),
-                "Produkt": s['produkty']['nazwa'] if s['produkty'] else "Usunięty",
-                "Ilość": s['ilosc'],
+                "Produkt": s['Produkty']['nazwa'] if s.get('Produkty') else "N/A",
+                "Sztuk": s['ilosc'],
                 "Odbiorca": s['odbiorca']
             })
-        st.table(pd.DataFrame(history_df))
-    else:
-        st.info("Nie zarejestrowano jeszcze żadnych wydań.")
+        st.table(df_hist)
 
-# --- ZAKŁADKA 4: DODAWANIE ---
+# --- ZAKŁADKA 4: NOWY PRODUKT ---
 with tab_dodaj:
-    st.subheader("Dodaj nowy asortyment do bazy")
-    with st.form("add_p"):
-        f1, f2 = st.columns(2)
-        with f1:
-            name = st.text_input("Nazwa")
-            cat_map = {c['nazwa']: c['id'] for c in categories}
-            cat = st.selectbox("Kategoria", options=list(cat_map.keys()))
-        with f2:
-            qty = st.number_input("Ilość", min_value=0)
-            price = st.number_input("Cena", min_value=0.0)
-        
+    with st.form("new_p"):
+        name = st.text_input("Nazwa")
+        cat_map = {c['nazwa']: c['id'] for c in categories}
+        cat = st.selectbox("Kategoria", options=list(cat_map.keys()))
+        qty = st.number_input("Ilość", min_value=0)
+        price = st.number_input("Cena")
         if st.form_submit_button("Dodaj"):
             add_product(name, qty, price, cat_map[cat])
