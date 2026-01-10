@@ -21,18 +21,43 @@ def fetch_data():
     return categories, products, shipments
 
 def add_product(nazwa, liczba, cena, kategoria_id):
-    res = supabase.table("Produkty").insert({
-        "nazwa": nazwa, "liczba": liczba, "cena": cena, "kategoria_id": kategoria_id
-    }).execute()
+    """Sprawdza czy produkt istnieje. Jeśli tak - sumuje ilość. Jeśli nie - tworzy nowy."""
+    # 1. Sprawdź, czy produkt o tej nazwie już istnieje
+    existing_p = supabase.table("Produkty").select("*").eq("nazwa", nazwa).execute().data
     
-    if res.data:
-        new_id = res.data[0]['id']
+    if existing_p:
+        # PRODUKT ISTNIEJE -> SUMUJEMY
+        p_id = existing_p[0]['id']
+        old_qty = existing_p[0]['liczba']
+        new_qty = old_qty + liczba
+        
+        # Aktualizujemy ilość (możesz też opcjonalnie zaktualizować cenę na nową)
+        supabase.table("Produkty").update({"liczba": new_qty, "cena": cena}).eq("id", p_id).execute()
+        
+        # Zapisujemy w historii jako DOSTAWA do istniejącego towaru
         supabase.table("wydania").insert({
-            "produkt_id": new_id,
+            "produkt_id": p_id,
             "ilosc": liczba,
-            "odbiorca": "NOWY PRODUKT",
+            "odbiorca": "DOSTAWA (IDENTYCZNA NAZWA)",
             "data_wydania": datetime.now().isoformat()
         }).execute()
+        st.success(f"Produkt '{nazwa}' już istniał. Zsumowano ilości. Nowy stan: {new_qty}")
+    else:
+        # PRODUKT NIE ISTNIEJE -> TWORZYMY NOWY
+        res = supabase.table("Produkty").insert({
+            "nazwa": nazwa, "liczba": liczba, "cena": cena, "kategoria_id": kategoria_id
+        }).execute()
+        
+        if res.data:
+            new_id = res.data[0]['id']
+            supabase.table("wydania").insert({
+                "produkt_id": new_id,
+                "ilosc": liczba,
+                "odbiorca": "NOWY PRODUKT",
+                "data_wydania": datetime.now().isoformat()
+            }).execute()
+        st.success(f"Dodano nowy produkt: {nazwa}")
+    
     st.rerun()
 
 def update_stock(product_id, current_qty, change, typ_operacji="DOSTAWA"):
