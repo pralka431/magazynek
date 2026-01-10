@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 
 # --- Konfiguracja Strony ---
-st.set_page_config(page_title="Magazyn PRO", layout="wide", page_icon="📦")
+st.set_page_config(page_title="Magazynek sklepu", layout="wide", page_icon="📦")
 
 # --- DANE DOSTĘPOWE ---
 SUPABASE_URL = "https://ijfoshdlcpccebzgpmox.supabase.co"
