@@ -91,24 +91,44 @@ except Exception as e:
 
 tabs = st.tabs(["📋 Stan Magazynu", "📤 Wydaj Towar", "📜 Historia Ruchu", "➕ Nowy Produkt"])
 
-# --- ZAKŁADKA: STAN ---
+# --- ZAKŁADKA: STAN MAGAZYNU (Zaktualizowana o ceny) ---
 with tabs[0]:
     if products:
+        # Nagłówki dla lepszej czytelności
+        h1, h2, h3, h4, h5 = st.columns([3, 2, 2, 2, 3])
+        h1.write("**Nazwa**")
+        h2.write("**Kategoria**")
+        h3.write("**Cena jedn.**")
+        h4.write("**Wartość**")
+        h5.write("**Zarządzaj stanem**")
+        st.markdown("---")
+
         for p in products:
             with st.container(border=True):
-                c1, c2, c3, c4 = st.columns([3, 2, 2, 3])
+                c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 3])
                 
+                # Dane podstawowe
                 c1.write(f"**{p['nazwa']}**")
                 kat = p['Kategorie']['nazwa'] if p.get('Kategorie') else "Brak"
-                c2.write(f"Kategoria: {kat}")
-                c3.write(f"Stan: **{p['liczba']}** szt.")
+                c2.write(kat)
                 
-                # Nowa sekcja: Dodawanie nieregularnych ilości
-                with c4:
+                # Wyświetlanie ceny
+                cena = float(p['cena']) if p.get('cena') else 0.0
+                c3.write(f"{cena:.2f} zł")
+                
+                # Obliczanie wartości całkowitej zapasu
+                wartosc_total = cena * p['liczba']
+                c4.write(f"**{wartosc_total:.2f} zł**")
+                
+                # Zarządzanie ilością
+                with c5:
                     sub_c1, sub_c2 = st.columns([1, 1])
-                    add_amt = sub_c1.number_input("Ile dodać?", min_value=1, step=1, key=f"input_{p['id']}", label_visibility="collapsed")
+                    add_amt = sub_c1.number_input("Ilość", min_value=1, step=1, key=f"in_{p['id']}", label_visibility="collapsed")
                     if sub_c2.button("➕ Dodaj", key=f"btn_{p['id']}", use_container_width=True):
                         update_stock(p['id'], p['liczba'], add_amt, "DOSTAWA")
+                
+                # Mały tekst informujący o stanie pod spodem
+                st.caption(f"Aktualnie na stanie: {p['liczba']} szt.")
     else:
         st.info("Magazyn jest pusty.")
 
