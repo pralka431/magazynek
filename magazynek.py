@@ -7,12 +7,16 @@ import pytz
 # --- KONFIGURACJA STRONY ---
 st.set_page_config(page_title="Magazynek Pro", layout="wide", page_icon="📦")
 
-# --- DANE DOSTĘPOWE ---
-SUPABASE_URL = "https://ijfoshdlcpccebzgpmox.supabase.co"
-SUPABASE_KEY = "sb_publishable_A1XPX9TeO-Q-rdpcujK75g_DeeUqBkf"
+# --- DANE DOSTĘPOWE (BEZPIECZNE) ---
+# Klucze są pobierane z pliku secrets.toml (lokalnie) lub ustawień hostingu
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+except KeyError:
+    st.error("Błąd: Nie znaleziono kluczy konfiguracyjnych w st.secrets!")
+    st.stop()
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
 # --- FUNKCJE POMOCNICZE CZASU ---
 
 def get_now_pl():
